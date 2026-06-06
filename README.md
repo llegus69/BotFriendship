@@ -90,7 +90,7 @@ Upon reaching **Brother in Arms** (10,000 points), Paragon mode activates. The c
 
 | Action | Points |
 |---|---|
-| Complete a quest with the bot in your party | +250 |
+| Complete a quest with the bot in your party | +50 |
 | Kill a normal creature (grants XP or honor) | +2 |
 | Kill an elite or rare | +10 |
 | Kill a worldboss or rare elite | +20 |
@@ -166,7 +166,7 @@ Item IDs can be looked up on [Wowhead WotLK](https://www.wowhead.com/wotlk).
 At the top of `BotFriendship.lua` you can adjust all values:
 
 ```lua
-local PUNTOS_MISION         = 250   -- points per completed quest
+local PUNTOS_MISION         = 50   -- points per completed quest
 local PUNTOS_KILL_NORMAL    = 2     -- normal creature
 local PUNTOS_KILL_ELITE     = 10    -- elite / rare
 local PUNTOS_KILL_BOSS      = 20    -- worldboss / rare elite
@@ -199,3 +199,6 @@ The addon includes support for **Spanish** and **English**. Switch from the lang
 
 Created by **Lleguito**.  
 Built on the AzerothCore + Eluna + mod-npc-bots ecosystem.
+
+<img width="1935" height="1278" alt="amigos" src="https://github.com/user-attachments/assets/8d3f3515-5a0f-4f50-8e19-d1a124499a50" />
+
