@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: BotFriendship
+## Notes: Sistema de afinidad y fidelidad independiente para NPCBots.
+## Author: Lleguito / Adaptaciones
+## Version: 1.0
+## SavedVariables: BotFriendshipDB
+
+BotFriendship.lua
