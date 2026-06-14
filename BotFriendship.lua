@@ -20,7 +20,7 @@ local PENALIZACION_MUERTE_BOT = -100
 local PENALIZACION_DESHONOR = -2000
 
 -- Sistema de bloqueo
-local BLOQUEO_DURACION = 30  -- 30 segundos para pruebas (cambiar a 15 * 60 en producción)
+local BLOQUEO_DURACION = 15 * 60  -- 30 segundos para pruebas (cambiar a 15 * 60 en producción)
 
 local function BF_FormatTiempo(segundos)
     local m = math.floor(segundos / 60)
