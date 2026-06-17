@@ -9,6 +9,7 @@ BF_EventFrame:RegisterEvent("QUEST_FINISHED")
 BF_EventFrame:RegisterEvent("CHAT_MSG_COMBAT_XP_GAIN")
 BF_EventFrame:RegisterEvent("CHAT_MSG_COMBAT_HONOR_GAIN")
 BF_EventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+BF_EventFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
 
 local PUNTOS_MISION = 50
 local PUNTOS_KILL_NORMAL = 2       
@@ -20,7 +21,7 @@ local PENALIZACION_MUERTE_BOT = -100
 local PENALIZACION_DESHONOR = -2000
 
 -- Sistema de bloqueo
-local BLOQUEO_DURACION = 15 * 60  -- 30 segundos para pruebas (cambiar a 15 * 60 en producción)
+local BLOQUEO_DURACION = 30  -- 30 segundos para pruebas (cambiar a 15 * 60 en producción)
 
 local function BF_FormatTiempo(segundos)
     local m = math.floor(segundos / 60)
@@ -92,6 +93,18 @@ local function GetRankInfo(pts, paragon)
     end
 end
 
+-- Mapeo escalonado: rango de amistad (1-5) -> número de insignia de
+-- rango de Honor de Blizzard (1-14). 1 y 2 se mantienen tal cual
+-- (Desconfiado=Soldado, Neutral=Bruto/Grunt); a partir de ahí se va
+-- escalando hasta llegar a la insignia 14 (General/Warlord) en el
+-- rango máximo "Hermano de Armas".
+local BF_RankBadgeNum = { 1, 2, 6, 10, 14 }
+
+local function BF_GetBadgeTextureForRank(rango)
+    local badgeNum = BF_RankBadgeNum[rango] or 1
+    return string.format("Interface\\PvPRankBadges\\PvPRank%02d", badgeNum)
+end
+
 local function BF_CheckDB()
     if not BotFriendshipDB then BotFriendshipDB = { Idioma = "ES", Bots = {} } end
     if not BotFriendshipDB.Bots then BotFriendshipDB.Bots = {} end
@@ -157,6 +170,12 @@ local function BF_CreateBotRow(index)
     local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     nameText:SetPoint("LEFT", classIcon, "RIGHT", 5, 0)
     row.nameText = nameText
+
+    local pvpIcon = row:CreateTexture(nil, "OVERLAY")
+    pvpIcon:SetSize(14, 14)
+    pvpIcon:SetPoint("LEFT", nameText, "RIGHT", 4, 0)
+    pvpIcon:SetTexture(BF_GetBadgeTextureForRank(1))
+    row.pvpIcon = pvpIcon
 
     local rankText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     rankText:SetPoint("TOPLEFT", classIcon, "BOTTOMLEFT", 0, -2)
@@ -229,8 +248,9 @@ local function BF_RefreshJournalList()
         row.nameText:SetText(name)
 
         local p = data.paragon or 0
-        local rankName, _, r, g, b = GetRankInfo(data.puntos, p)
+        local rankName, rango, r, g, b = GetRankInfo(data.puntos, p)
         local ptsDisplay = p > 0 and (data.puntos .. "/10000 pts") or (data.puntos .. " pts")
+        row.pvpIcon:SetTexture(BF_GetBadgeTextureForRank(rango))
 
         if data.bloqueado then
             local ahora = time()
@@ -277,6 +297,116 @@ local function BF_RefreshJournalList()
         row:Show()
     end
 end
+
+-- ============================================================
+-- ICONO DE RANGO (insignia de Honor) junto al nombre del bot
+-- Aparece en: fila del Diario (ya añadido arriba), Party Frame
+-- y nameplate del bot en el mundo. La insignia mostrada depende
+-- del rango de amistad actual del bot (ver BF_RankBadgeNum más
+-- arriba). Es solo un indicador visual del propio sistema de
+-- afinidad, no del estado real de PvP del personaje.
+-- ============================================================
+
+-- --- Party Frame (PartyMemberFrame1-4) ---
+local BF_PartyPvPIcons = {}
+for i = 1, 4 do
+    local pf = _G["PartyMemberFrame" .. i]
+    if pf then
+        local nameFS = _G["PartyMemberFrame" .. i .. "Name"]
+        local icon = pf:CreateTexture(nil, "OVERLAY")
+        icon:SetSize(14, 14)
+        icon:SetTexture(BF_GetBadgeTextureForRank(1))
+        if nameFS then
+            icon:SetPoint("LEFT", nameFS, "RIGHT", 2, 0)
+        else
+            icon:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -4, -4)
+        end
+        icon:Hide()
+        BF_PartyPvPIcons[i] = icon
+    end
+end
+
+local function BF_UpdatePartyPvPIcons()
+    for i = 1, 4 do
+        local icon = BF_PartyPvPIcons[i]
+        if icon then
+            local memberName = GetPartyMember(i) and UnitName("party" .. i)
+            local data = memberName and BotFriendshipDB and BotFriendshipDB.Bots and BotFriendshipDB.Bots[memberName]
+            if data then
+                local _, rango = GetRankInfo(data.puntos, data.paragon or 0)
+                icon:SetTexture(BF_GetBadgeTextureForRank(rango))
+                icon:Show()
+            else
+                icon:Hide()
+            end
+        end
+    end
+end
+
+-- --- Nameplates (placa de nombre sobre la cabeza del bot) ---
+-- AVISO: WotLK 3.3.5 no tiene una API oficial para vincular una
+-- nameplate con una unidad concreta. Esta detección se basa en la
+-- estructura por defecto de Blizzard (Frame sin nombre global +
+-- StatusBar de vida como primer hijo + FontString con el texto del
+-- nombre). Si usas otro addon de nameplates (TidyPlates, Aloft,
+-- KuiNameplates, etc.) que reemplace esa estructura, el icono puede
+-- no aparecer y habría que adaptar la detección a ese addon.
+-- Solo se muestra cuando el propio juego está mostrando el nombre
+-- sobre la placa (por ejemplo, con "Mostrar siempre nombres" activado,
+-- al objetivo, o al pasar el ratón).
+local BF_NamePlatePvPIcons = setmetatable({}, { __mode = "k" })
+
+local function BF_IsDefaultNamePlate(frame)
+    if frame:GetObjectType() ~= "Frame" or frame:GetName() then return false end
+    local child = select(1, frame:GetChildren())
+    return child ~= nil and child:GetObjectType() == "StatusBar"
+end
+
+local function BF_GetNamePlateNameRegion(frame)
+    for _, region in ipairs({ frame:GetRegions() }) do
+        if region:GetObjectType() == "FontString" then
+            local text = region:GetText()
+            if text and text ~= "" then return region, text end
+        end
+    end
+end
+
+local function BF_ScanNamePlatesForPvPIcon()
+    if not BotFriendshipDB or not BotFriendshipDB.Bots then return end
+    for _, frame in ipairs({ WorldFrame:GetChildren() }) do
+        if frame:IsVisible() and BF_IsDefaultNamePlate(frame) then
+            local nameRegion, text = BF_GetNamePlateNameRegion(frame)
+            local data = text and BotFriendshipDB.Bots[text]
+            if nameRegion and data then
+                local icon = BF_NamePlatePvPIcons[frame]
+                if not icon then
+                    icon = frame:CreateTexture(nil, "OVERLAY")
+                    icon:SetSize(12, 12)
+                    BF_NamePlatePvPIcons[frame] = icon
+                end
+                local _, rango = GetRankInfo(data.puntos, data.paragon or 0)
+                icon:SetTexture(BF_GetBadgeTextureForRank(rango))
+                icon:ClearAllPoints()
+                icon:SetPoint("LEFT", nameRegion, "RIGHT", 2, 0)
+                icon:Show()
+            elseif BF_NamePlatePvPIcons[frame] then
+                BF_NamePlatePvPIcons[frame]:Hide()
+            end
+        elseif BF_NamePlatePvPIcons[frame] then
+            BF_NamePlatePvPIcons[frame]:Hide()
+        end
+    end
+end
+
+local BF_NamePlateScanner = CreateFrame("Frame")
+local BF_NPScanElapsed = 0
+BF_NamePlateScanner:SetScript("OnUpdate", function(self, elapsed)
+    BF_NPScanElapsed = BF_NPScanElapsed + elapsed
+    if BF_NPScanElapsed >= 0.2 then
+        BF_NPScanElapsed = 0
+        BF_ScanNamePlatesForPvPIcon()
+    end
+end)
 
 local BF_HelpWin = CreateFrame("Frame", nil, BF_Journal)
 BF_HelpWin:SetSize(360, 320)
@@ -476,7 +606,12 @@ BF_EventFrame:SetScript("OnEvent", function(self, event, ...)
         BF_LangBtn:SetText(BF_L("LANG_BTN"))
         -- Revisar si algún bot debe desbloquearse tras haber cerrado sesión durante el castigo
         C_Timer.After(2, function() BF_CheckDesbloqueos() end)
+        BF_UpdatePartyPvPIcons()
         print("|cff00ff00BotFriendship:|r " .. BF_L("TITLE") .. " listo.")
+    end
+
+    if event == "PARTY_MEMBERS_CHANGED" then
+        BF_UpdatePartyPvPIcons()
     end
 
     if event == "QUEST_FINISHED" then
